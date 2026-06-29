@@ -26,4 +26,10 @@ export const resources = {
 
   updateProfile: (displayName: string, token: string | null) =>
     api("/auth/me", { method: "PATCH", body: JSON.stringify({ display_name: displayName }) }, token),
+
+  // 152-ФЗ: права субъекта ПДн
+  dataExport: (token: string | null) => api<unknown>("/me/data-export", {}, token),
+
+  deleteAccount: (token: string | null) =>
+    api<void>("/me/account", { method: "DELETE" }, token),
 };

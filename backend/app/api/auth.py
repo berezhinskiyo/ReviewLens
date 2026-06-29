@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import client_ip, get_current_user, persist_refresh_token
 from app.core.config import settings
+from app.core.ratelimit import rate_limit
 from app.core.security import (
     create_access_token,
     get_password_hash,
@@ -111,7 +112,10 @@ def to_me(user: User) -> UserMe:
 # --- Регистрация по e-mail с кодом -------------------------------------------
 
 
-@router.post("/register/request-code")
+@router.post(
+    "/register/request-code",
+    dependencies=[Depends(rate_limit("register_code", limit=5, window_seconds=300))],
+)
 async def request_register_code(
     payload: EmailCodeRequest,
     request: Request,
@@ -140,7 +144,11 @@ async def request_register_code(
     return {"ok": True, "message": "Код отправлен на почту"}
 
 
-@router.post("/register/verify", response_model=TokenResponse)
+@router.post(
+    "/register/verify",
+    response_model=TokenResponse,
+    dependencies=[Depends(rate_limit("register_verify", limit=15, window_seconds=300))],
+)
 async def verify_register_code(
     payload: EmailCodeVerify, db: AsyncSession = Depends(get_db)
 ) -> TokenResponse:
@@ -219,14 +227,20 @@ async def register(
     return await _issue_tokens(user, db)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    dependencies=[Depends(rate_limit("login", limit=10, window_seconds=60))],
+)
 async def login(
     payload: UserLoginRequest, db: AsyncSession = Depends(get_db)
 ) -> TokenResponse:
     email = str(payload.email).lower()
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
-    if not user or not verify_password(payload.password, user.password_hash):
+    if not user or user.deleted_at or not verify_password(
+        payload.password, user.password_hash
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверные учётные данные"
         )

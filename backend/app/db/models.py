@@ -35,6 +35,8 @@ class User(Base):
     # Согласие на обработку ПДн (152-ФЗ)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consent_version: Mapped[str | None] = mapped_column(String(32))
+    # Удаление аккаунта = анонимизация ПДн (платежи сохраняем для налогового учёта)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     plan: Mapped[str] = mapped_column(String(32), nullable=False, default="free")
     subscription_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

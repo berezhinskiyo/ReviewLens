@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import analyses, auth, payments
+from app.api import analyses, auth, me, payments
 from app.core.config import settings
 from app.core.logging import setup_logging
 
@@ -18,6 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(me.router)
 app.include_router(analyses.router)
 app.include_router(payments.router)
 

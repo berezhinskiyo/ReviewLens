@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { API_URL } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { SmartCaptcha, captchaEnabled } from "./SmartCaptcha";
@@ -19,6 +20,7 @@ export function AuthModal({
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | undefined>();
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -154,13 +156,22 @@ export function AuthModal({
               />
             </div>
             {captchaEnabled && <SmartCaptcha onToken={setCaptchaToken} />}
+            <label className="consent-row">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+              />
+              <span>
+                Я принимаю <Link to="/offer" target="_blank">оферту</Link> и даю согласие
+                на обработку персональных данных согласно{" "}
+                <Link to="/privacy" target="_blank">политике</Link>.
+              </span>
+            </label>
             {error && <p className="error-text">{error}</p>}
-            <button className="btn btn-primary btn-block" disabled={busy}>
+            <button className="btn btn-primary btn-block" disabled={busy || !consent}>
               {busy ? "Отправляем код…" : "Получить код на почту"}
             </button>
-            <p className="muted" style={{ fontSize: 12 }}>
-              Регистрируясь, вы принимаете оферту и политику обработки персональных данных.
-            </p>
           </form>
         )}
 

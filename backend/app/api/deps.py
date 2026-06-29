@@ -55,7 +55,7 @@ async def get_current_user(
         user = await db.get(User, uuid.UUID(user_id))
     except ValueError:
         user = None
-    if user is None:
+    if user is None or user.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Пользователь не найден."
         )

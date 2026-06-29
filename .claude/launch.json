@@ -3,10 +3,11 @@
   "configurations": [
     {
       "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--host", "127.0.0.1", "--port", "5180"],
       "cwd": "frontend",
-      "port": 5173
+      "port": 5180,
+      "autoPort": false
     }
   ]
 }

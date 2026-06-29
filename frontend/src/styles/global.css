@@ -316,6 +316,8 @@ p { margin: 0; }
 .oauth-row .btn { flex: 1; }
 .divider { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; margin: 18px 0; }
 .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.consent-row { display: flex; gap: 9px; align-items: flex-start; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+.consent-row input { margin-top: 2px; width: 16px; height: 16px; accent-color: var(--primary); flex-shrink: 0; }
 
 /* ─── Футер ───────────────────────────────────────────────────────────────── */
 .site-footer { background: var(--shell); color: var(--shell-text); margin-top: 40px; padding: 40px 0 24px; }
