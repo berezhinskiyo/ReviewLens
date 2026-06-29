@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env / secrets — НИКОГДА не коммитим
+.env
+*.env
+!.env.example
+!*.env.example
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Логи и временные
+*.log
+.DS_Store
+coverage/
+dist/
