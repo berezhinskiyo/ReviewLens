@@ -15,11 +15,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://reviewlens:reviewlens@db:5432/reviewlens"
     redis_url: str = "redis://redis:6379/0"
 
-    # OpenAI — модели параметризуем, чтобы менять без передеплоя
+    # LLM-роутер (OpenAI-совместимый). По умолчанию — polza.ai.
+    # Пусто в base_url = напрямую OpenAI. Модели параметризуем без передеплоя.
     openai_api_key: str = ""
-    openai_model_extract: str = "gpt-4o-mini"
-    openai_model_cluster: str = "gpt-4o-mini"
-    openai_model_synth: str = "gpt-4o-mini"
+    openai_base_url: str = "https://polza.ai/api/v1"
+    openai_model_extract: str = "google/gemini-2.5-flash-lite"
+    openai_model_cluster: str = "google/gemini-2.5-flash-lite"
+    openai_model_synth: str = "deepseek/deepseek-v3.2"
 
     # JWT
     jwt_secret_key: str = "change-me-in-production"
