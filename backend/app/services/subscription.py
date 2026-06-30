@@ -22,6 +22,8 @@ def effective_plan(user: User) -> str:
 
 
 def analyses_limit(user: User) -> int | None:
+    if user.is_admin:
+        return None  # администраторы — без лимитов
     return limit_for_plan(effective_plan(user))
 
 
