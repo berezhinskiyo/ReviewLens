@@ -24,14 +24,9 @@ async def create_analysis(
 ) -> AnalysisOut:
     # Проверяем, что URL валиден и маркетплейс поддерживается
     try:
-        marketplace = detect_marketplace(payload.url)
+        detect_marketplace(payload.url)
     except ScraperError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    if marketplace != "wb":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Пока поддерживается только Wildberries. Ozon — скоро.",
-        )
 
     # Проверяем лимит тарифа
     if not can_run_analysis(user):

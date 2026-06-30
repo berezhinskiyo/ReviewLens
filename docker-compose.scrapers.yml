@@ -1,0 +1,9 @@
+# Оверрайд: воркер с headless-браузером (Playwright) для Ozon / Яндекс.Маркет / Avito.
+# Запуск:
+#   docker compose -f docker-compose.yml -f docker-compose.scrapers.yml up -d --build worker
+# Без этого оверрайда работают только WB и Мегамаркет (без браузера).
+services:
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.playwright

@@ -1,0 +1,16 @@
+# Образ воркера с headless-браузером для Ozon / Яндекс.Маркет / Avito.
+# Базируется на официальном образе Playwright (Chromium уже установлен).
+FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+RUN pip install --upgrade pip && pip install -e ".[scrapers]"
+
+COPY . .
+
+CMD ["python", "-m", "app.workers.worker"]

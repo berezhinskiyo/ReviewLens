@@ -26,9 +26,30 @@ def test_parse_url_invalid() -> None:
 
 def test_detect_marketplace() -> None:
     assert detect_marketplace("https://www.wildberries.ru/catalog/1/detail.aspx") == "wb"
-    assert detect_marketplace("https://www.ozon.ru/product/abc-1") == "ozon"
+    assert detect_marketplace("https://www.ozon.ru/product/abc-1234567/") == "ozon"
+    assert detect_marketplace("https://market.yandex.ru/product--x/123456") == "yandex"
+    assert detect_marketplace("https://megamarket.ru/catalog/details/x_100012345678/") == "megamarket"
+    assert detect_marketplace("https://www.avito.ru/moskva/x/nazvanie_1234567890") == "avito"
     with pytest.raises(ScraperError):
         detect_marketplace("https://aliexpress.com/item/1")
+
+
+def test_parse_url_other_markets() -> None:
+    from app.scrapers.avito import AvitoScraper
+    from app.scrapers.megamarket import MegamarketScraper
+    from app.scrapers.ozon import OzonScraper
+    from app.scrapers.yandex import YandexMarketScraper
+
+    assert MegamarketScraper().parse_url(
+        "https://megamarket.ru/catalog/details/tovar_100012345678/"
+    ) == "100012345678"
+    assert OzonScraper().parse_url("https://www.ozon.ru/product/nazvanie-1234567890/") == "1234567890"
+    assert YandexMarketScraper().parse_url(
+        "https://market.yandex.ru/product--nazvanie/987654321"
+    ) == "987654321"
+    assert AvitoScraper().parse_url(
+        "https://www.avito.ru/moskva/odezhda/platie_2233445566"
+    ) == "2233445566"
 
 
 # Живые артикулы WB — запускать осознанно: RUN_LIVE_SCRAPER=1 pytest -k live

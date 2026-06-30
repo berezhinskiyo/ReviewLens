@@ -1,17 +1,81 @@
-from app.scrapers.base import BaseScraper, ScrapeResult, ScraperError
+import re
+from datetime import datetime
+
+from app.scrapers.base import ScrapedProduct, ScrapedReview, ScrapeResult, ScraperError
+from app.scrapers.playwright_base import PageCapture, PlaywrightScraper, deep_find_lists
+
+# https://www.ozon.ru/product/nazvanie-tovara-1234567890/
+_SKU_RE = re.compile(r"/product/[^/]*?-(\d{5,})/?")
+_ANY_NUM = re.compile(r"(\d{6,})")
+
+_REVIEW_KEYS = ("comment", "text", "positive", "negative", "score", "review")
 
 
-class OzonScraper(BaseScraper):
-    """Ozon в MVP не поддерживается (см. ТЗ 7.2).
-
-    Требует headless-браузер / внутренний API через сессию — вынесено в BACKLOG.
-    Кнопка Ozon в UI помечена «скоро» и disabled.
-    """
+class OzonScraper(PlaywrightScraper):
+    """Ozon: SPA + анти-бот. Берём отзывы из composer-api XHR через браузер."""
 
     marketplace = "ozon"
+    CAPTURE_URL_NEEDLES = ("composer-api", "/reviews", "webListReviews", "review")
 
-    def parse_url(self, url: str) -> str:  # noqa: ARG002
-        raise ScraperError("Поддержка Ozon появится позже. Пока доступен только Wildberries.")
+    def parse_url(self, url: str) -> str:
+        m = _SKU_RE.search(url) or _ANY_NUM.search(url)
+        if not m:
+            raise ScraperError(
+                "Не удалось распознать товар Ozon. Нужна ссылка вида "
+                "ozon.ru/product/nazvanie-1234567890/"
+            )
+        return m.group(1)
 
-    async def scrape(self, url: str, max_reviews: int) -> ScrapeResult:  # noqa: ARG002
-        raise ScraperError("Поддержка Ozon появится позже. Пока доступен только Wildberries.")
+    def _target_url(self, url: str) -> str:
+        base = url.split("?")[0].rstrip("/")
+        return f"{base}/reviews/"
+
+    def parse_capture(self, external_id: str, url: str, cap: PageCapture) -> ScrapeResult:
+        product = ScrapedProduct(
+            marketplace=self.marketplace,
+            external_id=external_id,
+            url=url,
+            title=_extract_title(cap.html),
+        )
+        reviews: dict[str, ScrapedReview] = {}
+        for payload in cap.matching(*self.CAPTURE_URL_NEEDLES):
+            for raw in deep_find_lists(payload, _REVIEW_KEYS):
+                rid = str(raw.get("uuid") or raw.get("id") or len(reviews))
+                if rid in reviews:
+                    continue
+                mapped = _map_ozon_review(rid, raw)
+                if mapped:
+                    reviews[rid] = mapped
+        return ScrapeResult(product=product, reviews=list(reviews.values()))
+
+
+def _extract_title(html: str) -> str | None:
+    m = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    if m:
+        return m.group(1).split(" - ")[0].strip() or None
+    return None
+
+
+def _map_ozon_review(rid: str, raw: dict) -> ScrapedReview | None:
+    content = raw.get("content") if isinstance(raw.get("content"), dict) else raw
+    text = content.get("comment") or content.get("text")
+    pros = content.get("positive") or content.get("pros")
+    cons = content.get("negative") or content.get("cons")
+    if not (text or pros or cons):
+        return None
+    score = raw.get("score") or raw.get("rating") or content.get("score")
+    date = None
+    raw_date = raw.get("publishedAt") or raw.get("createdAt") or raw.get("date")
+    if raw_date:
+        try:
+            date = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            date = None
+    return ScrapedReview(
+        external_id=rid,
+        rating=int(score) if isinstance(score, (int, float)) else None,
+        text=text or None,
+        pros=pros or None,
+        cons=cons or None,
+        review_date=date,
+    )

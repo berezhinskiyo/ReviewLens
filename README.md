@@ -73,6 +73,26 @@ RUN_LIVE_SCRAPER=1 pytest -k live       # живой парсинг WB
 RUN_LLM_E2E=1 pytest -k prompts_e2e -s  # e2e пайплайн на фикстуре (тратит токены OpenAI)
 ```
 
+## Маркетплейсы
+
+| Площадка | Метод | Примечание |
+|---|---|---|
+| Wildberries | httpx (basket-CDN + feedbacks) | стабильно |
+| Мегамаркет | httpx (mobile JSON-API) | нужен чистый РФ-IP сервера |
+| Ozon | Playwright (перехват composer-api) | нужен headless-воркер; в проде — прокси |
+| Яндекс.Маркет | Playwright | SmartCaptcha — нужны резидентные прокси |
+| Avito | Playwright | отзывы о продавце; сильный анти-бот |
+
+Скрапер выбирается по домену (`app/scrapers/registry.py`). Для Ozon/Яндекс/Avito
+поднимите воркер с браузером:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scrapers.yml up -d --build worker
+```
+
+Без этого оверрайда работают только WB и Мегамаркет (без браузера). Playwright-парсеры
+написаны «по контракту» и требуют боевой обкатки на РФ-сервере (см. BACKLOG.md).
+
 ## Деплой (прод)
 
 Единый домен: Caddy маршрутизирует `/api/*` → backend, остальное → статика фронта
