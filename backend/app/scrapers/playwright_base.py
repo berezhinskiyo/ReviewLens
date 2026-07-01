@@ -5,6 +5,7 @@ JSON-ответы, которые сама страница грузит для 
 их. Требует установленного Playwright + Chromium (см. Dockerfile.playwright).
 """
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 
@@ -144,10 +145,22 @@ class PlaywrightScraper(BaseScraper):
     def parse_capture(self, external_id: str, url: str, cap: PageCapture) -> ScrapeResult:
         raise NotImplementedError
 
+    # Жёсткий общий таймаут на браузерный сбор — чтобы воркер не висел на
+    # медленном прокси (иначе задача держится до RQ-таймаута в 10 минут).
+    OVERALL_TIMEOUT_S = 150
+
     async def scrape(self, url: str, max_reviews: int) -> ScrapeResult:
         external_id = self.parse_url(url)
         logger.info("pw.scrape.start", marketplace=self.marketplace, id=external_id)
-        cap = await self._capture(self._target_url(url))
+        try:
+            cap = await asyncio.wait_for(
+                self._capture(self._target_url(url)), timeout=self.OVERALL_TIMEOUT_S
+            )
+        except asyncio.TimeoutError as exc:
+            raise ScraperError(
+                "Площадка не ответила вовремя (вероятно, медленный прокси/анти-бот). "
+                "Нужен более быстрый резидентный прокси или платный парсинг-API."
+            ) from exc
         result = self.parse_capture(external_id, url, cap)
         # Фолбэк: если из XHR отзывы не разобрались, берём тексты из DOM
         if not result.reviews and cap.dom_texts:
