@@ -41,9 +41,11 @@ class PlaywrightScraper(BaseScraper):
     CAPTURE_URL_NEEDLES: tuple[str, ...] = ()
     # CSS-селектор контейнеров отзывов для DOM-фолбэка (переопределяется)
     DOM_REVIEW_SELECTOR: str = "[data-review-uuid], [class*='review' i], article"
+    # Блокировать картинки/медиа/шрифты/стили (экономит трафик медленного прокси)
+    BLOCK_RESOURCES = True
     SCROLLS = 8
-    SCROLL_PAUSE_MS = 1200
-    NAV_TIMEOUT_MS = 45000
+    SCROLL_PAUSE_MS = 1500
+    NAV_TIMEOUT_MS = 60000
 
     async def __aexit__(self, *exc: object) -> None:
         # httpx-клиент базового класса нам не нужен, но закроем его
@@ -91,10 +93,23 @@ class PlaywrightScraper(BaseScraper):
                 except Exception:  # noqa: BLE001 — не JSON / гонка — пропускаем
                     pass
 
+            # Блокируем тяжёлые ресурсы (картинки/медиа/шрифты/стили) — они не нужны
+            # для текста отзывов, но съедают весь трафик медленного прокси.
+            if self.BLOCK_RESOURCES:
+                blocked = {"image", "media", "font", "stylesheet"}
+
+                async def _router(route) -> None:
+                    if route.request.resource_type in blocked:
+                        await route.abort()
+                    else:
+                        await route.continue_()
+
+                await context.route("**/*", _router)
+
             context.on("response", on_response)
             page = await context.new_page()
             try:
-                await page.goto(url, timeout=self.NAV_TIMEOUT_MS, wait_until="domcontentloaded")
+                await page.goto(url, timeout=self.NAV_TIMEOUT_MS, wait_until="commit")
                 # Прокрутка, чтобы догрузить отзывы (ленивые XHR)
                 for _ in range(self.SCROLLS):
                     await page.mouse.wheel(0, 2500)
