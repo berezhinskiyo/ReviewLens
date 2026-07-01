@@ -1,0 +1,46 @@
+# Пример деплоя ReviewLens РЯДОМ с другим проектом, переиспользуя его Postgres/Redis.
+# Скопируйте в docker-compose.server.yml и подставьте свои значения.
+#
+# 1) Создайте базу в существующем Postgres:
+#      docker exec <other>-postgres-1 psql -U <user> -d <db> -c "CREATE DATABASE reviewlens;"
+# 2) В backend/.env укажите:
+#      DATABASE_URL=postgresql+asyncpg://<user>:<pass>@<other>-postgres-1:5432/reviewlens
+#      REDIS_URL=redis://<other>-redis-1:6379/1
+#      OPENAI_* (polza), JWT_SECRET_KEY, BACKEND_URL/FRONTEND_URL (http://IP:порт),
+#      CORS_ORIGINS=["http://IP:15175"]
+# 3) Запуск:
+#      docker compose -f docker-compose.server.yml up -d --build
+#      docker compose -f docker-compose.server.yml exec backend alembic upgrade head
+#      docker compose -f docker-compose.server.yml exec backend python -m app.scripts.create_admin
+#
+# worker собирается из Dockerfile.playwright (с браузером) — тянет WB/Мегамаркет и
+# Ozon/Яндекс/Avito. Для последних в проде обычно нужен SCRAPER_PROXY (резидентный).
+name: reviewlens
+services:
+  backend:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file: ./backend/.env
+    ports: ["18002:8000"]
+    networks: [shared]
+    restart: unless-stopped
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.playwright
+    env_file: ./backend/.env
+    networks: [shared]
+    restart: unless-stopped
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: http://SERVER_IP:18002/api
+    ports: ["15175:80"]
+    networks: [shared]
+    restart: unless-stopped
+networks:
+  shared:
+    external: true
+    name: OTHER_PROJECT_default   # напр. cv-tailor_default

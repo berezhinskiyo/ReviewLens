@@ -1,6 +1,6 @@
 # Образ воркера с headless-браузером для Ozon / Яндекс.Маркет / Avito.
-# Базируется на официальном образе Playwright (Chromium уже установлен).
-FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+# Noble = Ubuntu 24.04 c Python 3.12 (jammy идёт с 3.10, а проект требует 3.11+).
+FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -9,7 +9,9 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install -e ".[scrapers]"
+RUN pip install --upgrade pip --break-system-packages \
+ && pip install -e ".[scrapers]" --break-system-packages \
+ && playwright install chromium
 
 COPY . .
 
