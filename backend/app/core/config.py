@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     max_reviews_per_analysis: int = 500
     analysis_cost_budget_kopecks: int = 1500
 
+    # Прокси для скраперов (Ozon/Яндекс/Avito часто требуют РФ/резидентные прокси).
+    # Формат: http://user:pass@host:port или socks5://host:port. Пусто = без прокси.
+    scraper_proxy: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

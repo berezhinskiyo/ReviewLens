@@ -22,6 +22,8 @@ class CapturedResponse:
 class PageCapture:
     html: str = ""
     responses: list[CapturedResponse] = field(default_factory=list)
+    # Текст отзывов, вытащенный прямо из DOM (фолбэк, если XHR пустой)
+    dom_texts: list[str] = field(default_factory=list)
 
     def matching(self, *needles: str) -> list[object]:
         out = []
@@ -37,6 +39,8 @@ class PlaywrightScraper(BaseScraper):
     marketplace = ""
     # Подстроки URL XHR-запросов, которые нас интересуют (переопределяется)
     CAPTURE_URL_NEEDLES: tuple[str, ...] = ()
+    # CSS-селектор контейнеров отзывов для DOM-фолбэка (переопределяется)
+    DOM_REVIEW_SELECTOR: str = "[data-review-uuid], [class*='review' i], article"
     SCROLLS = 8
     SCROLL_PAUSE_MS = 1200
     NAV_TIMEOUT_MS = 45000
@@ -54,12 +58,18 @@ class PlaywrightScraper(BaseScraper):
                 "playwright и Chromium (см. Dockerfile.playwright)."
             ) from exc
 
+        from app.core.config import settings
+
+        launch_kwargs: dict = {
+            "headless": True,
+            "args": ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+        }
+        if settings.scraper_proxy:
+            launch_kwargs["proxy"] = {"server": settings.scraper_proxy}
+
         capture = PageCapture()
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-            )
+            browser = await pw.chromium.launch(**launch_kwargs)
             context = await browser.new_context(
                 locale="ru-RU",
                 user_agent=(
@@ -90,6 +100,15 @@ class PlaywrightScraper(BaseScraper):
                     await page.mouse.wheel(0, 2500)
                     await page.wait_for_timeout(self.SCROLL_PAUSE_MS)
                 capture.html = await page.content()
+                # DOM-фолбэк: собираем текст из контейнеров отзывов
+                try:
+                    capture.dom_texts = await page.eval_on_selector_all(
+                        self.DOM_REVIEW_SELECTOR,
+                        "els => els.map(e => e.innerText)"
+                        ".filter(t => t && t.trim().length > 40)",
+                    )
+                except Exception:  # noqa: BLE001
+                    capture.dom_texts = []
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "playwright.nav_failed", marketplace=self.marketplace, error=str(exc)
@@ -115,6 +134,14 @@ class PlaywrightScraper(BaseScraper):
         logger.info("pw.scrape.start", marketplace=self.marketplace, id=external_id)
         cap = await self._capture(self._target_url(url))
         result = self.parse_capture(external_id, url, cap)
+        # Фолбэк: если из XHR отзывы не разобрались, берём тексты из DOM
+        if not result.reviews and cap.dom_texts:
+            from app.scrapers.base import ScrapedReview
+
+            result.reviews = [
+                ScrapedReview(external_id=str(i), text=t.strip())
+                for i, t in enumerate(cap.dom_texts)
+            ]
         result.reviews = result.reviews[:max_reviews]
         if not result.reviews:
             raise ScraperError(

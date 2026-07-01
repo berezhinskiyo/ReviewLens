@@ -8,14 +8,21 @@ from app.scrapers.playwright_base import PageCapture, PlaywrightScraper, deep_fi
 _SKU_RE = re.compile(r"/product/[^/]*?-(\d{5,})/?")
 _ANY_NUM = re.compile(r"(\d{6,})")
 
-_REVIEW_KEYS = ("comment", "text", "positive", "negative", "score", "review")
+# Строгие ключи: настоящий отзыв Ozon содержит content.comment/positive/negative
+_REVIEW_KEYS = ("comment", "positive", "negative", "reviewuuid", "authorname")
 
 
 class OzonScraper(PlaywrightScraper):
-    """Ozon: SPA + анти-бот. Берём отзывы из composer-api XHR через браузер."""
+    """Ozon: SPA + анти-бот. Берём отзывы из composer-api/entrypoint XHR через браузер."""
 
     marketplace = "ozon"
-    CAPTURE_URL_NEEDLES = ("composer-api", "/reviews", "webListReviews", "review")
+    CAPTURE_URL_NEEDLES = (
+        "composer-api",
+        "entrypoint-api",
+        "page/json/v2",
+        "webListReviews",
+        "/reviews",
+    )
 
     def parse_url(self, url: str) -> str:
         m = _SKU_RE.search(url) or _ANY_NUM.search(url)
@@ -58,10 +65,14 @@ def _extract_title(html: str) -> str | None:
 
 def _map_ozon_review(rid: str, raw: dict) -> ScrapedReview | None:
     content = raw.get("content") if isinstance(raw.get("content"), dict) else raw
-    text = content.get("comment") or content.get("text")
+    # настоящий отзыв: есть comment/positive/negative (а не просто «text» тултипа)
+    text = content.get("comment")
     pros = content.get("positive") or content.get("pros")
     cons = content.get("negative") or content.get("cons")
     if not (text or pros or cons):
+        return None
+    # отсекаем UI-объекты: у отзыва должен быть автор или оценка
+    if raw.get("score") is None and content.get("score") is None and not raw.get("author"):
         return None
     score = raw.get("score") or raw.get("rating") or content.get("score")
     date = None

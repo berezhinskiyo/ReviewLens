@@ -61,7 +61,12 @@ class BaseScraper:
     _lock = asyncio.Lock()
 
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=True)
+        from app.core.config import settings
+
+        proxy = settings.scraper_proxy or None
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0), follow_redirects=True, proxy=proxy
+        )
 
     async def __aenter__(self) -> "BaseScraper":
         return self
