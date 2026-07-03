@@ -58,8 +58,8 @@ export function NewAnalysisPage() {
             >
               <div className="card-body" style={{ padding: 14, fontSize: 14 }}>
                 <span className="muted">
-                  Поддерживается <strong>Wildberries</strong>. Другие площадки (Ozon,
-                  Яндекс.Маркет, Мегамаркет, Avito) — в планах.
+                  Вставьте ссылку на карточку товара <strong>Wildberries</strong> —
+                  например, из строки браузера или кнопки «Поделиться».
                 </span>
               </div>
             </div>
