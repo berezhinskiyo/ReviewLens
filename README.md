@@ -83,15 +83,17 @@ RUN_LLM_E2E=1 pytest -k prompts_e2e -s  # e2e пайплайн на фиксту
 | Яндекс.Маркет | Playwright | SmartCaptcha — нужны резидентные прокси |
 | Avito | Playwright | отзывы о продавце; сильный анти-бот |
 
-Скрапер выбирается по домену (`app/scrapers/registry.py`). Для Ozon/Яндекс/Avito
-поднимите воркер с браузером:
+Скрапер выбирается по домену (`app/scrapers/registry.py`). В проде по умолчанию
+включён **только Wildberries** (`ENABLED_MARKETPLACES=wb`) — он не требует браузера и
+работает стабильно. Остальные площадки есть в коде, но отключены: их анти-бот
+(Ozon/Яндекс — SmartCaptcha/Qrator, Мегамаркет/Avito — блок по IP) не пробивается
+ни резидентными прокси, ни базовыми scraping-API-триалами (проверено). Для их
+включения нужен платный анти-бот-источник (Web Unlocker с РФ-гео) — тогда
+`ENABLED_MARKETPLACES=wb,ozon,...` и воркер с браузером:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.scrapers.yml up -d --build worker
 ```
-
-Без этого оверрайда работают только WB и Мегамаркет (без браузера). Playwright-парсеры
-написаны «по контракту» и требуют боевой обкатки на РФ-сервере (см. BACKLOG.md).
 
 ## Деплой (прод)
 

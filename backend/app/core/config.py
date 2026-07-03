@@ -69,9 +69,17 @@ class Settings(BaseSettings):
 
     env: str = "development"
 
+    # Включённые маркетплейсы (через запятую). Остальные скраперы есть в коде,
+    # но отключены до появления надёжного источника (анти-бот/прокси).
+    enabled_marketplaces: str = "wb"
+
     # Лимиты и экономика
     max_reviews_per_analysis: int = 500
     analysis_cost_budget_kopecks: int = 1500
+
+    @property
+    def enabled_marketplaces_set(self) -> set[str]:
+        return {m.strip() for m in self.enabled_marketplaces.split(",") if m.strip()}
 
     # Прокси для скраперов (Ozon/Яндекс/Avito часто требуют РФ/резидентные прокси).
     # Формат: http://user:pass@host:port или socks5://host:port. Пусто = без прокси.

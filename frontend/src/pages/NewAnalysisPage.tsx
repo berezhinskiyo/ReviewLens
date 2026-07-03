@@ -11,21 +11,14 @@ export function NewAnalysisPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const DOMAINS = [
-    "wildberries.ru",
-    "wb.ru",
-    "ozon.ru",
-    "market.yandex.ru",
-    "megamarket.ru",
-    "avito.ru",
-  ];
+  const DOMAINS = ["wildberries.ru", "wb.ru"];
   const valid = DOMAINS.some((d) => url.includes(d));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     if (!valid) {
-      setError("Нужна ссылка на карточку Wildberries, Ozon, Яндекс.Маркета, Мегамаркета или Avito.");
+      setError("Нужна ссылка на карточку Wildberries.");
       return;
     }
     setBusy(true);
@@ -65,10 +58,8 @@ export function NewAnalysisPage() {
             >
               <div className="card-body" style={{ padding: 14, fontSize: 14 }}>
                 <span className="muted">
-                  Поддерживаются <strong>Wildberries</strong>, <strong>Ozon</strong>,{" "}
-                  <strong>Яндекс.Маркет</strong>, <strong>Мегамаркет</strong> и{" "}
-                  <strong>Avito</strong>. WB и Мегамаркет — быстро; для остальных анализ
-                  может занять чуть дольше.
+                  Поддерживается <strong>Wildberries</strong>. Другие площадки (Ozon,
+                  Яндекс.Маркет, Мегамаркет, Avito) — в планах.
                 </span>
               </div>
             </div>

@@ -24,9 +24,17 @@ async def create_analysis(
 ) -> AnalysisOut:
     # Проверяем, что URL валиден и маркетплейс поддерживается
     try:
-        detect_marketplace(payload.url)
+        marketplace = detect_marketplace(payload.url)
     except ScraperError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    from app.core.config import settings
+
+    if marketplace not in settings.enabled_marketplaces_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Пока поддерживается только Wildberries. Другие площадки — в планах.",
+        )
 
     # Проверяем лимит тарифа
     if not can_run_analysis(user):
