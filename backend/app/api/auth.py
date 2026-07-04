@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -5,11 +7,13 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import client_ip, get_current_user, persist_refresh_token
 from app.core.config import settings
+from app.core.logging import logger
 from app.core.ratelimit import rate_limit
 from app.core.security import (
     create_access_token,
@@ -353,6 +357,17 @@ def _frontend_url(path: str) -> str:
     return f"{settings.frontend_url.rstrip('/')}{path}"
 
 
+# --- PKCE-хранилище (для VK ID) в Redis ---
+_redis: Redis | None = None
+
+
+def _get_redis() -> Redis:
+    global _redis
+    if _redis is None:
+        _redis = Redis.from_url(settings.redis_url)
+    return _redis
+
+
 @router.get("/oauth/{provider}/start")
 async def oauth_start(provider: str):
     cfg = _oauth_config(provider)
@@ -364,6 +379,27 @@ async def oauth_start(provider: str):
         "scope": cfg["scope"],
         "state": state,
     }
+    # VK ID (OAuth 2.1) требует PKCE: генерируем verifier/challenge, verifier
+    # кладём в Redis по state (TTL 10 мин), в authorize уходит challenge.
+    if provider == "vk":
+        code_verifier = secrets.token_urlsafe(64)
+        code_challenge = (
+            base64.urlsafe_b64encode(
+                hashlib.sha256(code_verifier.encode("ascii")).digest()
+            )
+            .rstrip(b"=")
+            .decode("ascii")
+        )
+        try:
+            await _get_redis().set(f"vk_pkce:{state}", code_verifier, ex=600)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("vk.pkce.store_failed", error=str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="VK OAuth временно недоступен",
+            ) from exc
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
     return RedirectResponse(f"{cfg['auth_url']}?{urlencode(params)}")
 
 
@@ -431,15 +467,46 @@ async def oauth_callback(
     code: str,
     db: AsyncSession = Depends(get_db),
     state: str | None = None,
+    device_id: str | None = None,
 ):
     cfg = _oauth_config(provider)
-    token_payload = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "client_id": cfg["client_id"],
-        "client_secret": cfg["client_secret"],
-        "redirect_uri": _oauth_redirect_uri(provider),
-    }
+
+    if provider == "vk":
+        # VK ID: обмен по PKCE + device_id (client_secret в обмене не участвует)
+        if not state or not device_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="VK callback missing state/device_id",
+            )
+        code_verifier = None
+        try:
+            v = await _get_redis().get(f"vk_pkce:{state}")
+            code_verifier = v.decode() if v else None
+            await _get_redis().delete(f"vk_pkce:{state}")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("vk.pkce.read_failed", error=str(exc))
+        if not code_verifier:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="VK OAuth state expired, попробуйте войти заново",
+            )
+        token_payload = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": cfg["client_id"],
+            "device_id": device_id,
+            "redirect_uri": _oauth_redirect_uri(provider),
+            "code_verifier": code_verifier,
+            "state": state,
+        }
+    else:
+        token_payload = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": cfg["client_id"],
+            "client_secret": cfg["client_secret"],
+            "redirect_uri": _oauth_redirect_uri(provider),
+        }
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         token_resp = await client.post(cfg["token_url"], data=token_payload)
@@ -451,20 +518,41 @@ async def oauth_callback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="OAuth token exchange failed",
             )
-        info_resp = await client.get(
-            cfg["userinfo_url"], headers={"Authorization": f"Bearer {access_token}"}
-        )
+        if provider == "vk":
+            info_resp = await client.post(
+                cfg["userinfo_url"],
+                data={"client_id": cfg["client_id"], "access_token": access_token},
+            )
+        else:
+            info_resp = await client.get(
+                cfg["userinfo_url"], headers={"Authorization": f"Bearer {access_token}"}
+            )
         info_resp.raise_for_status()
         info = info_resp.json()
 
-    provider_user_id = str(info.get("id") or info.get("sub") or "")
-    email = info.get("default_email") or info.get("email")
-    display_name = (
-        info.get("real_name")
-        or info.get("display_name")
-        or " ".join(filter(None, [info.get("first_name"), info.get("last_name")])).strip()
-        or None
-    )
+    if provider == "vk":
+        user_data = info.get("user") if isinstance(info.get("user"), dict) else info
+        provider_user_id = str(user_data.get("user_id") or user_data.get("id") or "")
+        email = (
+            user_data.get("email")
+            or token_data.get("email")
+            or (f"vk-{provider_user_id}@oauth.local" if provider_user_id else None)
+        )
+        first = (user_data.get("first_name") or "").strip()
+        last = (user_data.get("last_name") or "").strip()
+        display_name = f"{first} {last}".strip() or None
+    else:
+        provider_user_id = str(info.get("id") or info.get("sub") or "")
+        email = info.get("default_email") or info.get("email")
+        display_name = (
+            info.get("real_name")
+            or info.get("display_name")
+            or " ".join(
+                filter(None, [info.get("first_name"), info.get("last_name")])
+            ).strip()
+            or None
+        )
+
     if not provider_user_id or not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
