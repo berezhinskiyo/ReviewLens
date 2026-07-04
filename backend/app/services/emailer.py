@@ -122,7 +122,7 @@ def _send_via_smtp(to: str, subject: str, text: str) -> None:
     port = settings.smtp_port
     user = settings.smtp_user.strip()
     password = settings.smtp_password.strip()
-    from_addr = (settings.smtp_from or user or "noreply@reviewlens.ru").strip()
+    from_addr = (settings.smtp_from or user or "noreply@vniknu.ru").strip()
     use_ssl = settings.smtp_ssl or port == 465
 
     msg = EmailMessage()
