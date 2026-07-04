@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,17 +36,18 @@ async def create(
     return CreatePaymentResponse(confirmation_url=confirmation_url, payment_id=payment.id)
 
 
-@router.post("/webhook", status_code=status.HTTP_200_OK)
-async def webhook(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
-    """Вебхук ЮKassa. Без auth, доверие по подписи/событию ЮKassa."""
+@router.post("/webhook")
+async def webhook(request: Request, db: AsyncSession = Depends(get_db)) -> PlainTextResponse:
+    """Уведомление Т-Банка. Без auth — доверие по подписи Token."""
     try:
-        event = await request.json()
+        payload = await request.json()
     except Exception:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bad payload")
 
-    logger.info("yookassa.webhook.received", event=event.get("event"))
-    await handle_webhook(db, event)
-    return {"ok": True}
+    logger.info("tinkoff.webhook.received", status=payload.get("Status"))
+    await handle_webhook(db, payload)
+    # Т-Банк ждёт тело "OK", иначе будет повторять уведомление
+    return PlainTextResponse("OK")
 
 
 @router.get("", response_model=list[PaymentOut])

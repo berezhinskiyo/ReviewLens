@@ -59,13 +59,23 @@ class Settings(BaseSettings):
     vk_client_id: str = ""
     vk_client_secret: str = ""
 
-    # Отправка email с кодом (SMTP → консоль в dev)
+    # Отправка email с кодом. Приоритет: Postbox HTTP → SMTP → консоль (dev).
+    email_http_endpoint: str = ""  # напр. https://postbox.cloud.yandex.net
+    email_http_key_id: str = ""    # access key id статического ключа сервисного аккаунта
+    email_http_secret: str = ""    # secret этого ключа
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_ssl: bool = False
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = "noreply@reviewlens.ru"
+
+    # Эквайринг Т-Банк (T-Bank / Тинькофф Касса)
+    tinkoff_terminal_key: str = ""
+    tinkoff_password: str = ""
+    tinkoff_api_url: str = "https://securepay.tinkoff.ru/v2/"
+    tinkoff_taxation: str = "usn_income"
+    tinkoff_vat: str = "none"
 
     env: str = "development"
 
