@@ -31,7 +31,10 @@ def test_tinkoff_token_ignores_nested_and_token() -> None:
 
 
 def test_verify_notification_roundtrip(monkeypatch) -> None:
-    monkeypatch.setattr(tinkoff.settings, "tinkoff_password", "secret")
+    # Подпись читает пароль из настроек, зарегистрированных в auth-billing-core.
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "tinkoff_password", "secret")
     payload = {"TerminalKey": "T", "OrderId": "o", "Success": True, "Status": "CONFIRMED"}
     payload["Token"] = tinkoff.gen_token(payload)
     assert tinkoff.verify_notification(payload) is True
