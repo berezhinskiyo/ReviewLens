@@ -7,6 +7,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# git нужен для pip-установки общего пакета authbilling из GitHub (git+https)
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Сначала зависимости — для кэширования слоя
 COPY pyproject.toml ./
 RUN pip install --upgrade pip && pip install -e .
