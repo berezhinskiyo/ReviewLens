@@ -1,10 +1,10 @@
 name: Deploy
 
-# Каскад окружений (main → test → prod), два независимых стека на одном сервере,
-# за общим edge-Caddy. Миграции alembic гоняются явным шагом (в образе их нет в CMD).
-#   push main  → синхронизируем ветку test (запускает деплой TEST)
-#   push test  → деплой TEST (reviewlens.test.vniknu.ru) + промоушен в prod (за флагом)
-#   push prod  → деплой PROD (reviewlens.vniknu.ru)  (за флагом DEPLOY_PROD_ENABLED)
+# Каскад окружений (main → test → prod), два стека на общем сервере за edge-Caddy
+# и общим PostgreSQL. Секреты — в GitHub: Environment (test/prod) хранит DOTENV с полным
+# .env окружения; деплой пишет его на сервер. Миграции alembic — отдельным шагом.
+# Отдельный ручной job bootstrap-infra (workflow_dispatch) поднимает общий PostgreSQL
+# и edge-Caddy из секретов (без ручного SSH).
 
 on:
   push:
@@ -12,12 +12,18 @@ on:
       - main
       - test
       - prod
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: "Поднять общий PostgreSQL + edge-Caddy (инфраструктура)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: false
 
 env:
@@ -25,9 +31,61 @@ env:
   REPO_URL: "https://github.com/berezhinskiyo/ReviewLens.git"
 
 jobs:
+  # ── Разовый бутстрап общей инфраструктуры (по кнопке Run workflow) ──────────
+  bootstrap-infra:
+    name: Bootstrap shared-postgres + edge
+    if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Encode shared-postgres env (base64, masked)
+        id: enc
+        env:
+          PG_DOTENV: ${{ secrets.SHARED_POSTGRES_DOTENV }}
+        run: |
+          if [ -z "$PG_DOTENV" ]; then echo "секрет SHARED_POSTGRES_DOTENV пуст"; exit 1; fi
+          B64=$(printf '%s' "$PG_DOTENV" | base64 -w0)
+          echo "::add-mask::$B64"
+          echo "b64=$B64" >> "$GITHUB_OUTPUT"
+      - name: Bootstrap over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          PG_DOTENV_B64: ${{ steps.enc.outputs.b64 }}
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: PG_DOTENV_B64
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            SRC="/opt/reviewlens-infra-src"
+            if [ ! -d "$SRC/.git" ]; then
+              git clone --branch main "${{ env.REPO_URL }}" "$SRC"
+            fi
+            cd "$SRC" && git fetch origin main && git reset --hard origin/main
+            # Освободить 80/443 от старых стеков со своим Caddy (свежий старт)
+            for d in /opt/cv-tailor /opt/reviewlens; do
+              if [ -d "$d" ]; then
+                (cd "$d" && docker compose down 2>/dev/null || true; \
+                 docker compose -f docker-compose.prod.yml down 2>/dev/null || true)
+              fi
+            done
+            # Общий PostgreSQL (создаёт сеть shared + базы при первом старте)
+            mkdir -p /opt/shared-postgres
+            cp -r "$SRC/deploy/shared-postgres/." /opt/shared-postgres/
+            umask 077
+            printf '%s' "$PG_DOTENV_B64" | base64 -d > /opt/shared-postgres/.env
+            (cd /opt/shared-postgres && docker compose up -d)
+            # edge-Caddy (80/443 + авто-TLS для всех 4 доменов)
+            mkdir -p /opt/edge
+            cp "$SRC/deploy/edge/docker-compose.yml" "$SRC/deploy/edge/Caddyfile" /opt/edge/
+            (cd /opt/edge && docker compose up -d)
+            docker ps
+
+  # ── main → test ────────────────────────────────────────────────────────────
   sync-test:
     name: main → test
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,17 +97,31 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git push origin main:test --force
 
+  # ── деплой TEST ─────────────────────────────────────────────────────────────
   deploy-test:
     name: Deploy TEST (reviewlens.test.vniknu.ru)
-    if: github.ref == 'refs/heads/test'
+    if: github.ref == 'refs/heads/test' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    environment: test
     steps:
+      - name: Encode env (base64, masked)
+        id: enc
+        env:
+          DOTENV: ${{ secrets.DOTENV }}
+        run: |
+          if [ -z "$DOTENV" ]; then echo "секрет DOTENV пуст в Environment 'test'"; exit 1; fi
+          B64=$(printf '%s' "$DOTENV" | base64 -w0)
+          echo "::add-mask::$B64"
+          echo "b64=$B64" >> "$GITHUB_OUTPUT"
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.2
+        env:
+          DOTENV_B64: ${{ steps.enc.outputs.b64 }}
         with:
           host: ${{ env.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: DOTENV_B64
           command_timeout: 40m
           script: |
             set -euo pipefail
@@ -61,18 +133,18 @@ jobs:
             cd "$APP_DIR"
             git fetch origin "$BRANCH"
             git reset --hard "origin/$BRANCH"
-            if [ ! -f .env ]; then
-              echo "ERROR: $APP_DIR/.env отсутствует — положите .env окружения (см. deploy/env.test.example)"; exit 1
-            fi
+            umask 077
+            printf '%s' "$DOTENV_B64" | base64 -d > "$APP_DIR/.env"
             docker compose build --no-cache backend
             docker compose up -d redis
             docker compose run --rm backend alembic upgrade head
             docker compose up -d
             docker compose ps
 
+  # ── test → prod (промоушен, за флагом) ─────────────────────────────────────
   sync-prod:
     name: test → prod
-    if: github.ref == 'refs/heads/test' && vars.DEPLOY_PROD_ENABLED == 'true'
+    if: github.ref == 'refs/heads/test' && github.event_name == 'push' && vars.DEPLOY_PROD_ENABLED == 'true'
     needs: deploy-test
     runs-on: ubuntu-latest
     steps:
@@ -85,17 +157,31 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git push origin test:prod --force
 
+  # ── деплой PROD (за флагом) ─────────────────────────────────────────────────
   deploy-prod:
     name: Deploy PROD (reviewlens.vniknu.ru)
-    if: github.ref == 'refs/heads/prod' && vars.DEPLOY_PROD_ENABLED == 'true'
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push' && vars.DEPLOY_PROD_ENABLED == 'true'
     runs-on: ubuntu-latest
+    environment: prod
     steps:
+      - name: Encode env (base64, masked)
+        id: enc
+        env:
+          DOTENV: ${{ secrets.DOTENV }}
+        run: |
+          if [ -z "$DOTENV" ]; then echo "секрет DOTENV пуст в Environment 'prod'"; exit 1; fi
+          B64=$(printf '%s' "$DOTENV" | base64 -w0)
+          echo "::add-mask::$B64"
+          echo "b64=$B64" >> "$GITHUB_OUTPUT"
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.2
+        env:
+          DOTENV_B64: ${{ steps.enc.outputs.b64 }}
         with:
           host: ${{ env.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: DOTENV_B64
           command_timeout: 40m
           script: |
             set -euo pipefail
@@ -107,9 +193,8 @@ jobs:
             cd "$APP_DIR"
             git fetch origin "$BRANCH"
             git reset --hard "origin/$BRANCH"
-            if [ ! -f .env ]; then
-              echo "ERROR: $APP_DIR/.env отсутствует — положите .env окружения (см. deploy/env.prod.example)"; exit 1
-            fi
+            umask 077
+            printf '%s' "$DOTENV_B64" | base64 -d > "$APP_DIR/.env"
             docker compose build --no-cache backend
             docker compose up -d redis
             docker compose run --rm backend alembic upgrade head

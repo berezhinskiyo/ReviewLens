@@ -26,50 +26,33 @@ push prod  → деплой PROD          (при DEPLOY_PROD_ENABLED=true)
 - **Миграции** alembic гоняются шагом деплоя (`docker compose run --rm backend alembic upgrade head`),
   т.к. в образе backend их нет в CMD.
 
-## Разовый бутстрап сервера
+## Бутстрап (всё через GitHub — ручной SSH не нужен)
 
-### 0. Единый PostgreSQL (один раз на весь сервер)
-Один инстанс PG на все 4 окружения; у каждого своя база+роль. Создаёт сеть `shared`,
-к которой подключаются backend/worker всех стеков.
-```bash
-mkdir -p /opt/shared-postgres
-cp -r deploy/shared-postgres/* /opt/shared-postgres/
-cp deploy/shared-postgres/env.example /opt/shared-postgres/.env
-nano /opt/shared-postgres/.env      # задать пароли ролей (совпадают с .env окружений!)
-cd /opt/shared-postgres && docker compose up -d
-```
-Базы (`cvtailor_prod/test`, `reviewlens_prod/test`) создаются при ПЕРВОМ старте на
-пустом volume. Пароль роли окружения = `DB_PASSWORD` (cvtailor) / `POSTGRES_PASSWORD`
-(reviewlens) в соответствующем `.env`.
+Секреты живут в GitHub, деплой сам пишет `.env` на сервер. Полный список констант —
+в **`GITHUB_SECRETS.md`**. Кратко:
 
-### 1. Единый edge-Caddy (один раз на весь сервер)
-Файлы: `deploy/edge/docker-compose.yml` + `deploy/edge/Caddyfile` (4 домена).
-```bash
-mkdir -p /opt/edge
-cp deploy/edge/docker-compose.yml deploy/edge/Caddyfile /opt/edge/
-cd /opt/edge && docker compose up -d
-```
-Если на сервере УЖЕ есть общий Caddy — не поднимай этот стек, а добавь блоки из
-`deploy/edge/Caddyfile` в существующий Caddyfile и сделай `caddy reload`.
+### 1. Заполнить секреты GitHub (оба репо)
+- Repo secret `SSH_PRIVATE_KEY`, repo secret `SHARED_POSTGRES_DOTENV` (только ReviewLens).
+- Repo variable `DEPLOY_PROD_ENABLED` — пока не задавать.
+- Environments `test` и `prod`, в каждом секрет `DOTENV` с полным .env окружения.
 
-> Внимание: пока edge (или существующий общий прокси) не владеет 80/443, старые
-> `/opt/reviewlens` и `/opt/cv-tailor` со СВОИМ Caddy надо остановить (`docker compose down`),
-> иначе конфликт портов. Данные не нужны (свежий старт) — старые каталоги можно удалить.
+### 2. Поднять общую инфраструктуру (по кнопке)
+ReviewLens → **Actions → Deploy → Run workflow** с галочкой **bootstrap**. Job
+`bootstrap-infra`:
+- остановит старые `/opt/cv-tailor` и `/opt/reviewlens` (освободит 80/443);
+- поднимет **общий PostgreSQL** (`/opt/shared-postgres`, сеть `shared`, 4 базы+роли из
+  `SHARED_POSTGRES_DOTENV`);
+- поднимет **edge-Caddy** (`/opt/edge`, 80/443 + авто-TLS на 4 домена).
 
-### 2. `.env` окружения (в git нет, деплой не трогает)
-```bash
-mkdir -p /opt/reviewlens-test /opt/reviewlens-prod
-nano /opt/reviewlens-test/.env    # по deploy/env.test.example: WEB_PORT=28081, домен test, ДЕМО-креды Т-Банка
-nano /opt/reviewlens-prod/.env    # по deploy/env.prod.example: WEB_PORT=18081, домен prod, БОЕВЫЕ креды Т-Банка
-```
-Обязательно разные `POSTGRES_PASSWORD` и `JWT_SECRET_KEY` для test и prod.
+### 3. OAuth
+Redirect URI всех доменов добавить в приложениях Яндекс/VK.
 
-### 3. GitHub
-- Секрет `SSH_PRIVATE_KEY` — на месте.
-- `DEPLOY_PROD_ENABLED` не выставлять, пока не обкатан test.
+### 4. Деплой
+Пуш в `main` (или `test`) каждого репо → раскатит **TEST** (prod за флагом
+`DEPLOY_PROD_ENABLED`). Каталоги `/opt/*-{test,prod}` создаются автоматически.
 
-### 4. OAuth
-Redirect URI обоих доменов добавить в приложениях Яндекс/VK.
+> Файлы `deploy/env.*.example` и `deploy/shared-postgres/env.example` оставлены как
+> справочные шаблоны значений — на сервер их класть НЕ нужно, всё идёт из GitHub.
 
 ## Скраперы
 По умолчанию worker собирается из обычного `backend/Dockerfile` — работают **WB и
