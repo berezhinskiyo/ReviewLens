@@ -1,0 +1,127 @@
+# Деплой ReviewLens под ОБЩИЙ edge-Caddy (test/prod на одном сервере).
+# TLS терминирует общий edge; этот стек отдаёт единый loopback-порт ${WEB_PORT}
+# (nginx-сплиттер: /api → backend, остальное → frontend). Свой Caddy здесь НЕ нужен.
+# Конфиг окружения — в корневом .env (COMPOSE_FILE=docker-compose.deploy.yml),
+# значения приходят интерполяцией ${VAR}. Изоляция test/prod — через COMPOSE_PROJECT_NAME.
+name: ${COMPOSE_PROJECT_NAME:-reviewlens}
+
+x-backend-env: &backend_env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-reviewlens}:${POSTGRES_PASSWORD:-reviewlens}@db:5432/${POSTGRES_DB:-reviewlens}
+  REDIS_URL: redis://redis:6379/0
+  # LLM (polza.ai, OpenAI-совместимый)
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://polza.ai/api/v1}
+  OPENAI_MODEL_EXTRACT: ${OPENAI_MODEL_EXTRACT:-google/gemini-2.5-flash-lite}
+  OPENAI_MODEL_CLUSTER: ${OPENAI_MODEL_CLUSTER:-google/gemini-2.5-flash-lite}
+  OPENAI_MODEL_SYNTH: ${OPENAI_MODEL_SYNTH:-deepseek/deepseek-v3.2}
+  # JWT
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me}
+  # Внешние URL (через общий edge, https)
+  FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+  BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
+  # Регистрация / согласие
+  CONSENT_VERSION: ${CONSENT_VERSION:-2026-06-29}
+  BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+  # Капча
+  SMARTCAPTCHA_SERVER_KEY: ${SMARTCAPTCHA_SERVER_KEY:-}
+  # OAuth
+  YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID:-}
+  YANDEX_CLIENT_SECRET: ${YANDEX_CLIENT_SECRET:-}
+  VK_CLIENT_ID: ${VK_CLIENT_ID:-}
+  VK_CLIENT_SECRET: ${VK_CLIENT_SECRET:-}
+  # Email
+  EMAIL_HTTP_ENDPOINT: ${EMAIL_HTTP_ENDPOINT:-}
+  EMAIL_HTTP_KEY_ID: ${EMAIL_HTTP_KEY_ID:-}
+  EMAIL_HTTP_SECRET: ${EMAIL_HTTP_SECRET:-}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_SSL: ${SMTP_SSL:-false}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-noreply@reviewlens.ru}
+  # Эквайринг Т-Банк
+  TINKOFF_TERMINAL_KEY: ${TINKOFF_TERMINAL_KEY:-}
+  TINKOFF_PASSWORD: ${TINKOFF_PASSWORD:-}
+  TINKOFF_API_URL: ${TINKOFF_API_URL:-https://securepay.tinkoff.ru/v2/}
+  TINKOFF_TAXATION: ${TINKOFF_TAXATION:-usn_income}
+  TINKOFF_VAT: ${TINKOFF_VAT:-none}
+  # Окружение / маркетплейсы / скраперы
+  ENV: ${ENV:-production}
+  ENABLED_MARKETPLACES: ${ENABLED_MARKETPLACES:-wb}
+  SCRAPER_PROXY: ${SCRAPER_PROXY:-}
+  MAX_REVIEWS_PER_ANALYSIS: ${MAX_REVIEWS_PER_ANALYSIS:-500}
+  ANALYSIS_COST_BUDGET_KOPECKS: ${ANALYSIS_COST_BUDGET_KOPECKS:-1500}
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-reviewlens}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reviewlens}
+      POSTGRES_DB: ${POSTGRES_DB:-reviewlens}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-reviewlens}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment: *backend_env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # WB + Мегамаркет работают без браузера. Для Ozon/Яндекс/Avito подменить билд на
+  # Dockerfile.playwright (docker-compose.scrapers.yml) и задать SCRAPER_PROXY.
+  worker:
+    build: ./backend
+    command: python -m app.workers.worker
+    environment: *backend_env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: /api
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Единая точка входа стека: /api → backend, остальное → статика фронта.
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "127.0.0.1:${WEB_PORT:-18081}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+volumes:
+  pgdata:

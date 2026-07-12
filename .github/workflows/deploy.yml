@@ -1,0 +1,117 @@
+name: Deploy
+
+# Каскад окружений (main → test → prod), два независимых стека на одном сервере,
+# за общим edge-Caddy. Миграции alembic гоняются явным шагом (в образе их нет в CMD).
+#   push main  → синхронизируем ветку test (запускает деплой TEST)
+#   push test  → деплой TEST (reviewlens.test.vniknu.ru) + промоушен в prod (за флагом)
+#   push prod  → деплой PROD (reviewlens.vniknu.ru)  (за флагом DEPLOY_PROD_ENABLED)
+
+on:
+  push:
+    branches:
+      - main
+      - test
+      - prod
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SSH_HOST: "5.35.103.48"
+  REPO_URL: "https://github.com/berezhinskiyo/ReviewLens.git"
+
+jobs:
+  sync-test:
+    name: main → test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Update test from main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git push origin main:test --force
+
+  deploy-test:
+    name: Deploy TEST (reviewlens.test.vniknu.ru)
+    if: github.ref == 'refs/heads/test'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 40m
+          script: |
+            set -euo pipefail
+            APP_DIR="/opt/reviewlens-test"
+            BRANCH="test"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone --branch "$BRANCH" "${{ env.REPO_URL }}" "$APP_DIR"
+            fi
+            cd "$APP_DIR"
+            git fetch origin "$BRANCH"
+            git reset --hard "origin/$BRANCH"
+            if [ ! -f .env ]; then
+              echo "ERROR: $APP_DIR/.env отсутствует — положите .env окружения (см. deploy/env.test.example)"; exit 1
+            fi
+            docker compose build --no-cache backend
+            docker compose up -d db redis
+            docker compose run --rm backend alembic upgrade head
+            docker compose up -d
+            docker compose ps
+
+  sync-prod:
+    name: test → prod
+    if: github.ref == 'refs/heads/test' && vars.DEPLOY_PROD_ENABLED == 'true'
+    needs: deploy-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Update prod from test
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git push origin test:prod --force
+
+  deploy-prod:
+    name: Deploy PROD (reviewlens.vniknu.ru)
+    if: github.ref == 'refs/heads/prod' && vars.DEPLOY_PROD_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 40m
+          script: |
+            set -euo pipefail
+            APP_DIR="/opt/reviewlens-prod"
+            BRANCH="prod"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone --branch "$BRANCH" "${{ env.REPO_URL }}" "$APP_DIR"
+            fi
+            cd "$APP_DIR"
+            git fetch origin "$BRANCH"
+            git reset --hard "origin/$BRANCH"
+            if [ ! -f .env ]; then
+              echo "ERROR: $APP_DIR/.env отсутствует — положите .env окружения (см. deploy/env.prod.example)"; exit 1
+            fi
+            docker compose build --no-cache backend
+            docker compose up -d db redis
+            docker compose run --rm backend alembic upgrade head
+            docker compose up -d
+            docker compose ps

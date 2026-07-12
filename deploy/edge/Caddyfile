@@ -1,0 +1,24 @@
+# Единый edge для всех окружений на 5.35.103.48. TLS — авто (Let's Encrypt).
+# Каждый домен → loopback-порт своего стека (nginx стека слушает 127.0.0.1:PORT).
+
+# ── cv-tailor ────────────────────────────────────────────────────────────────
+cvtailor.vniknu.ru {
+	encode gzip
+	reverse_proxy 127.0.0.1:18080
+}
+
+cvtailor.test.vniknu.ru {
+	encode gzip
+	reverse_proxy 127.0.0.1:28080
+}
+
+# ── ReviewLens ───────────────────────────────────────────────────────────────
+reviewlens.vniknu.ru {
+	encode gzip
+	reverse_proxy 127.0.0.1:18081
+}
+
+reviewlens.test.vniknu.ru {
+	encode gzip
+	reverse_proxy 127.0.0.1:28081
+}

@@ -1,0 +1,23 @@
+# Единый edge-прокси для ВСЕХ окружений на сервере (cvtailor + reviewlens, test + prod).
+# Владеет портами 80/443 хоста, терминирует TLS (Let's Encrypt) и роутит каждый домен
+# на loopback-порт соответствующего стека. network_mode: host — чтобы дотянуться до
+# опубликованных на 127.0.0.1 портов проектных стеков и биндить 80/443 хоста.
+#
+# Разворачивается ОДИН РАЗ на сервере в /opt/edge:
+#   cd /opt/edge && docker compose up -d
+# Если на сервере УЖЕ есть общий Caddy — не поднимай этот стек, а добавь блоки из
+# ./Caddyfile в существующий Caddyfile и сделай reload.
+name: edge
+services:
+  caddy:
+    image: caddy:2-alpine
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
