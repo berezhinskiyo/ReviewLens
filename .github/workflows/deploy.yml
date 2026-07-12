@@ -65,7 +65,7 @@ jobs:
               echo "ERROR: $APP_DIR/.env отсутствует — положите .env окружения (см. deploy/env.test.example)"; exit 1
             fi
             docker compose build --no-cache backend
-            docker compose up -d db redis
+            docker compose up -d redis
             docker compose run --rm backend alembic upgrade head
             docker compose up -d
             docker compose ps
@@ -111,7 +111,7 @@ jobs:
               echo "ERROR: $APP_DIR/.env отсутствует — положите .env окружения (см. deploy/env.prod.example)"; exit 1
             fi
             docker compose build --no-cache backend
-            docker compose up -d db redis
+            docker compose up -d redis
             docker compose run --rm backend alembic upgrade head
             docker compose up -d
             docker compose ps

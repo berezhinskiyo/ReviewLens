@@ -1,0 +1,40 @@
+# Единый PostgreSQL на весь сервер (общий для cvtailor + reviewlens, test + prod).
+# 4 изолированные базы, у каждой свой пользователь/пароль (см. initdb/01-init.sh).
+# Наружу порт НЕ публикуется — доступ только по внутренней docker-сети `shared`,
+# к которой подключаются backend/worker проектных стеков.
+#
+# Разворачивается ОДИН РАЗ в /opt/shared-postgres:
+#   cd /opt/shared-postgres && docker compose up -d
+# Сеть `shared` и базы создаются автоматически (базы — только при первом init на
+# пустом volume). Проектные стеки ссылаются на сеть как external name: shared.
+name: shared
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: shared-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres}
+      # Пароли прикладных ролей (используются initdb-скриптом при первом старте)
+      CVTAILOR_PROD_DB_PASSWORD: ${CVTAILOR_PROD_DB_PASSWORD:-}
+      CVTAILOR_TEST_DB_PASSWORD: ${CVTAILOR_TEST_DB_PASSWORD:-}
+      REVIEWLENS_PROD_DB_PASSWORD: ${REVIEWLENS_PROD_DB_PASSWORD:-}
+      REVIEWLENS_TEST_DB_PASSWORD: ${REVIEWLENS_TEST_DB_PASSWORD:-}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    networks:
+      - shared
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+networks:
+  shared:
+    name: shared
+
+volumes:
+  pgdata:
