@@ -142,6 +142,9 @@ jobs:
             docker compose up -d redis
             docker compose run --rm backend alembic upgrade head
             docker compose up -d
+            # nginx резолвит апстримы (backend/frontend) один раз при старте.
+            # После пересоздания они получают новые IP → без рестарта nginx отдаёт 502.
+            docker compose restart nginx
             docker compose ps
 
   # ── test → prod (промоушен, за флагом) ─────────────────────────────────────
@@ -204,4 +207,7 @@ jobs:
             docker compose up -d redis
             docker compose run --rm backend alembic upgrade head
             docker compose up -d
+            # nginx резолвит апстримы (backend/frontend) один раз при старте.
+            # После пересоздания они получают новые IP → без рестарта nginx отдаёт 502.
+            docker compose restart nginx
             docker compose ps
