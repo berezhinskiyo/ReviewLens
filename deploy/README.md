@@ -1,6 +1,6 @@
 # Деплой ReviewLens — два окружения на общем сервере
 
-Сервер: `root@5.35.103.48` (msk-1-vm-7ibp). На нём живут ЧЕТЫРЕ стека
+Сервер: `root@109.73.197.92` (msk-1-vm-7ibp). На нём живут ЧЕТЫРЕ стека
 (cvtailor test/prod + reviewlens test/prod) за **единым edge-Caddy**, который владеет
 80/443 и терминирует TLS (Let's Encrypt). Каждый стек отдаёт nginx на свой loopback-порт.
 

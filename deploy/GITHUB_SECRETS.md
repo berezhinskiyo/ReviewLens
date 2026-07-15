@@ -8,7 +8,7 @@ edge поднимаются ручным запуском workflow (Run workflow
 ## 1. Repository secrets
 | Имя | Значение |
 |-----|----------|
-| `SSH_PRIVATE_KEY` | приватный SSH-ключ для `root@5.35.103.48` |
+| `SSH_PRIVATE_KEY` | приватный SSH-ключ для `root@109.73.197.92` |
 | `SHARED_POSTGRES_DOTENV` | полный .env общего PostgreSQL (см. блок ниже) |
 
 ## 2. Repository variables
