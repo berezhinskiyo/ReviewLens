@@ -1,17 +1,20 @@
 name: Deploy
 
-# Каскад окружений (main → test → prod), два стека на общем сервере за edge-Caddy
-# и общим PostgreSQL. Секреты — в GitHub: Environment (test/prod) хранит DOTENV с полным
-# .env окружения; деплой пишет его на сервер. Миграции alembic — отдельным шагом.
-# Отдельный ручной job bootstrap-infra (workflow_dispatch) поднимает общий PostgreSQL
-# и edge-Caddy из секретов (без ручного SSH).
+# Каскад main → test → prod ОДНИМ запуском (push в main).
+# Важно: push, сделанный GITHUB_TOKEN из Actions, НЕ триггерит новые workflow
+# (защита GitHub от рекурсии). Поэтому этапы связаны через needs внутри одного run,
+# а не через триггеры на push в ветки test/prod.
+#   sync-test   — обновляет ветку test из main
+#   deploy-test — катит TEST (reviewlens.test.vniknu.ru), миграции отдельным шагом
+#   sync-prod   — обновляет ветку prod из test   (при DEPLOY_PROD_ENABLED=true)
+#   deploy-prod — катит PROD (reviewlens.vniknu.ru) (при DEPLOY_PROD_ENABLED=true)
+# Ручной job bootstrap-infra (Run workflow + галка bootstrap) поднимает общий
+# PostgreSQL и edge-Caddy из секретов.
 
 on:
   push:
     branches:
       - main
-      - test
-      - prod
   workflow_dispatch:
     inputs:
       bootstrap:
@@ -85,7 +88,7 @@ jobs:
   # ── main → test ────────────────────────────────────────────────────────────
   sync-test:
     name: main → test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -100,7 +103,7 @@ jobs:
   # ── деплой TEST ─────────────────────────────────────────────────────────────
   deploy-test:
     name: Deploy TEST (reviewlens.test.vniknu.ru)
-    if: github.ref == 'refs/heads/test' && github.event_name == 'push'
+    needs: sync-test
     runs-on: ubuntu-latest
     environment: test
     steps:
@@ -144,8 +147,8 @@ jobs:
   # ── test → prod (промоушен, за флагом) ─────────────────────────────────────
   sync-prod:
     name: test → prod
-    if: github.ref == 'refs/heads/test' && github.event_name == 'push' && vars.DEPLOY_PROD_ENABLED == 'true'
     needs: deploy-test
+    if: vars.DEPLOY_PROD_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,12 +158,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git push origin test:prod --force
+          git fetch origin test
+          git push origin origin/test:refs/heads/prod --force
 
   # ── деплой PROD (за флагом) ─────────────────────────────────────────────────
   deploy-prod:
     name: Deploy PROD (reviewlens.vniknu.ru)
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push' && vars.DEPLOY_PROD_ENABLED == 'true'
+    needs: sync-prod
+    if: vars.DEPLOY_PROD_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: prod
     steps:
