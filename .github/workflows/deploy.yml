@@ -138,7 +138,10 @@ jobs:
             git reset --hard "origin/$BRANCH"
             umask 077
             printf '%s' "$DOTENV_B64" | base64 -d > "$APP_DIR/.env"
-            docker compose build --no-cache backend
+            # --no-cache для ВСЕХ собираемых сервисов: worker собирается из того же
+            # контекста ./backend, но отдельным образом — при сборке только backend
+            # он оставался на старом кэше (протухший CA-бандл жил в воркере).
+            docker compose build --no-cache
             docker compose up -d redis
             docker compose run --rm backend alembic upgrade head
             docker compose up -d
@@ -203,7 +206,10 @@ jobs:
             git reset --hard "origin/$BRANCH"
             umask 077
             printf '%s' "$DOTENV_B64" | base64 -d > "$APP_DIR/.env"
-            docker compose build --no-cache backend
+            # --no-cache для ВСЕХ собираемых сервисов: worker собирается из того же
+            # контекста ./backend, но отдельным образом — при сборке только backend
+            # он оставался на старом кэше (протухший CA-бандл жил в воркере).
+            docker compose build --no-cache
             docker compose up -d redis
             docker compose run --rm backend alembic upgrade head
             docker compose up -d
